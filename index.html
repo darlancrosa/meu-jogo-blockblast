@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Block Blast Combo Musical ?</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --grid-color: #1e293b;
+            --cell-size: clamp(35px, 10vw, 45px);
+            --accent: #f43f5e;
+            --preview-valid: rgba(34, 197, 94, 0.6);
+            --perfect-match: #ffffff;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: white;
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+            touch-action: none;
+            user-select: none;
+        }
+
+        #ui-top { text-align: center; margin-bottom: 10px; z-index: 100; }
+        #score-container { font-size: 2.8rem; font-weight: bold; color: #38bdf8; text-shadow: 0 0 20px rgba(56, 189, 248, 0.3); }
+        .controls { display: flex; gap: 8px; margin-top: 5px; }
+
+        button {
+            padding: 10px 15px; font-size: 0.9rem; cursor: pointer; border: none;
+            border-radius: 10px; color: white; font-weight: bold; background: #334155;
+        }
+
+        #auto-btn { background: var(--accent); box-shadow: 0 0 15px rgba(244, 63, 94, 0.4); }
+        #undo-btn { background: #f59e0b; }
+
+        #grid {
+            display: grid;
+            grid-template-columns: repeat(8, var(--cell-size));
+            grid-template-rows: repeat(8, var(--cell-size));
+            gap: 4px;
+            background-color: #334155;
+            padding: 8px;
+            border-radius: 10px;
+        }
+
+        .cell {
+            width: var(--cell-size);
+            height: var(--cell-size);
+            background-color: var(--grid-color);
+            border-radius: 4px;
+            transition: background-color 0.2s;
+        }
+
+        @keyframes perfect-glow {
+            0%, 100% { background-color: var(--preview-valid); }
+            50% { background-color: var(--perfect-match); box-shadow: 0 0 20px #fff; }
+        }
+
+        .preview-ok { background-color: var(--preview-valid) !important; }
+        .perfect-preview { animation: perfect-glow 0.3s infinite; }
+
+        #pieces-container {
+            margin-top: 20px;
+            display: flex; gap: 20px; height: 130px; align-items: center;
+            background: rgba(255,255,255,0.05); padding: 10px 20px; border-radius: 20px;
+            width: 90%; justify-content: center;
+        }
+
+        .piece-preview { display: grid; gap: 2px; }
+        .dragging { position: fixed; pointer-events: none; z-index: 1000; transform: scale(1.35); }
+        .block { width: 20px; height: 20px; border-radius: 3px; }
+        .empty-block { width: 20px; height: 20px; }
+    </style>
+</head>
+<body>
+
+<div id="ui-top">
+    <div id="score-container"><span id="score">0</span></div>
+    <div class="controls">
+        <button id="new-btn">Novo</button>
+        <button id="undo-btn" disabled>Voltar</button>
+        <button id="auto-btn">Mágica ?</button>
+    </div>
+</div>
+
+<div id="grid"></div>
+<div id="pieces-container"></div>
+
+<script>
+    const GRID_SIZE = 8;
+    const gridElement = document.getElementById('grid');
+    const piecesContainer = document.getElementById('pieces-container');
+    const scoreElement = document.getElementById('score');
+    
+    let score = 0;
+    let grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(null));
+    let currentPiecesData = [];
+    let history = [];
+    let activeDragging = null;
+    let lastPerfectPos = "";
+
+    const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+    // FUNÇÃO DE SOM MELHORADA
+    function playTone(freq, type, duration, volume) {
+        if(audioCtx.state === 'suspended') audioCtx.resume();
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+        gain.gain.setValueAtTime(volume, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + duration);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.start(); osc.stop(audioCtx.currentTime + duration);
+    }
+
+    // SOM DE PREVIEW (Sutil)
+    function playPerfectMatchSound() { 
+        playTone(1200, 'sine', 0.1, 0.3); 
+    }
+
+    // LÓGICA DE COMBO SONORO
+    function playComboSound(numLines) {
+        const baseFreq = 523.25; // Dó
+        const vol = Math.min(0.4 + (numLines * 0.1), 0.8); // Aumenta volume conforme combo
+        
+        if (numLines === 1) {
+            // Som Normal
+            playTone(baseFreq, 'triangle', 0.5, vol);
+            setTimeout(() => playTone(baseFreq * 1.25, 'triangle', 0.4, vol), 100);
+        } else if (numLines === 2) {
+            // Combo de 20 pontos - Mais brilhante
+            playTone(baseFreq * 1.25, 'square', 0.5, vol);
+            setTimeout(() => playTone(baseFreq * 1.5, 'square', 0.5, vol), 100);
+            setTimeout(() => playTone(baseFreq * 2, 'square', 0.6, vol), 200);
+        } else {
+            // Combo Épico (3 ou mais) - Acorde de Quinta/Oitava
+            const freqs = [baseFreq, baseFreq * 1.25, baseFreq * 1.5, baseFreq * 2];
+            freqs.forEach((f, i) => {
+                setTimeout(() => playTone(f * 1.5, 'square', 0.7, vol), i * 80);
+            });
+        }
+    }
+
+    const colors = ['#f43f5e', '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4'];
+    const pieceTemplates = [
+        [[1, 1], [1, 1]], [[1, 1, 1]], [[1], [1], [1]], 
+        [[1, 0], [1, 0], [1, 1]], [[1, 1, 1, 1]], [[1]], [[0, 1], [1, 1], [0, 1]]
+    ];
+
+    function initGame() {
+        score = 0; scoreElement.innerText = score;
+        grid = Array(GRID_SIZE).fill().map(() => Array(GRID_SIZE).fill(null));
+        history = []; document.getElementById('undo-btn').disabled = true;
+        createGrid(); generateNewPieces(); updateVisualGrid();
+    }
+
+    function createGrid() {
+        gridElement.innerHTML = '';
+        for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell'; cell.id = `cell-${r}-${c}`;
+                gridElement.appendChild(cell);
+            }
+        }
+    }
+
+    function generateNewPieces() {
+        piecesContainer.innerHTML = ''; currentPiecesData = [];
+        for (let i = 0; i < 3; i++) {
+            const template = pieceTemplates[Math.floor(Math.random() * pieceTemplates.length)];
+            const color = colors[Math.floor(Math.random() * colors.length)];
+            const id = 'p-' + Math.random().toString(36).substr(2, 5);
+            currentPiecesData.push({ id, template, color });
+            renderPiece(template, color, id);
+        }
+    }
+
+    function renderPiece(template, color, id) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'piece-preview'; wrapper.id = id;
+        wrapper.style.gridTemplateColumns = `repeat(${template[0].length}, 20px)`;
+        template.forEach(row => {
+            row.forEach(cell => {
+                const div = document.createElement('div');
+                div.className = cell ? 'block' : 'empty-block';
+                if (cell) div.style.backgroundColor = color;
+                wrapper.appendChild(div);
+            });
+        });
+        wrapper.addEventListener('touchstart', (e) => handleStart(e, id), {passive: false});
+        piecesContainer.appendChild(wrapper);
+    }
+
+    function handleStart(e, id) {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const piece = document.getElementById(id);
+        activeDragging = { id: id, el: piece, data: currentPiecesData.find(p => p.id === id), offsetY: 90 };
+        piece.classList.add('dragging');
+        movePiece(touch.clientX, touch.clientY);
+    }
+
+    document.addEventListener('touchmove', (e) => {
+        if (!activeDragging) return;
+        const touch = e.touches[0];
+        movePiece(touch.clientX, touch.clientY);
+        const target = document.elementFromPoint(touch.clientX, touch.clientY - activeDragging.offsetY);
+        clearPreviews();
+        if (target && target.id.startsWith('cell-')) {
+            const [_, r, c] = target.id.split('-').map(Number);
+            if (canPlace(activeDragging.data.template, r, c)) {
+                const perfect = wouldCompleteLines(activeDragging.data.template, r, c);
+                if (perfect && lastPerfectPos !== `${r}-${c}`) {
+                    playPerfectMatchSound();
+                    lastPerfectPos = `${r}-${c}`;
+                }
+                showPreview(activeDragging.data.template, r, c, perfect);
+            }
+        }
+    }, {passive: false});
+
+    document.addEventListener('touchend', (e) => {
+        if (!activeDragging) return;
+        const touch = e.changedTouches[0];
+        const target = document.elementFromPoint(touch.clientX, touch.clientY - activeDragging.offsetY);
+        if (target && target.id.startsWith('cell-')) {
+            const [_, r, c] = target.id.split('-').map(Number);
+            if (canPlace(activeDragging.data.template, r, c)) { executeMove(activeDragging.id, r, c); } 
+            else { resetPiece(); }
+        } else { resetPiece(); }
+        clearPreviews(); activeDragging = null; lastPerfectPos = "";
+    });
+
+    function movePiece(x, y) {
+        activeDragging.el.style.left = (x - (activeDragging.data.template[0].length * 10)) + 'px';
+        activeDragging.el.style.top = (y - activeDragging.offsetY - (activeDragging.data.template.length * 10)) + 'px';
+    }
+
+    function resetPiece() {
+        activeDragging.el.classList.remove('dragging');
+        activeDragging.el.style.position = ''; activeDragging.el.style.left = ''; activeDragging.el.style.top = '';
+    }
+
+    function canPlace(template, row, col) {
+        for (let r = 0; r < template.length; r++) {
+            for (let c = 0; c < template[r].length; c++) {
+                if (template[r][c]) {
+                    const nr = row + r, nc = col + c;
+                    if (nr >= GRID_SIZE || nc >= GRID_SIZE || grid[nr][nc] !== null) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    function executeMove(id, row, col) {
+        const piece = currentPiecesData.find(p => p.id === id);
+        saveState();
+        for (let r = 0; r < piece.template.length; r++) {
+            for (let c = 0; c < piece.template[r].length; c++) {
+                if (piece.template[r][c]) grid[row + r][col + c] = piece.color;
+            }
+        }
+        currentPiecesData = currentPiecesData.filter(p => p.id !== id);
+        const el = document.getElementById(id);
+        if(el) el.remove();
+        checkLines(); updateVisualGrid();
+        if (currentPiecesData.length === 0) generateNewPieces();
+    }
+
+    function checkLines() {
+        let rows = [], cols = [];
+        for (let i = 0; i < GRID_SIZE; i++) {
+            if (grid[i].every(c => c !== null)) rows.push(i);
+            if (grid.map(r => r[i]).every(c => c !== null)) cols.push(i);
+        }
+        const totalLines = rows.length + cols.length;
+        if (totalLines > 0) {
+            playComboSound(totalLines);
+            rows.forEach(r => grid[r].fill(null));
+            cols.forEach(c => grid.forEach(row => row[c] = null));
+            score += totalLines * 10;
+            scoreElement.innerText = score;
+            setTimeout(updateVisualGrid, 200);
+        }
+    }
+
+    function updateVisualGrid() {
+        for (let r = 0; r < GRID_SIZE; r++) {
+            for (let c = 0; c < GRID_SIZE; c++) {
+                const cell = document.getElementById(`cell-${r}-${c}`);
+                cell.style.backgroundColor = grid[r][c] || 'var(--grid-color)';
+            }
+        }
+    }
+
+    function saveState() {
+        history.push({ grid: JSON.parse(JSON.stringify(grid)), score, pieces: JSON.parse(JSON.stringify(currentPiecesData)) });
+        document.getElementById('undo-btn').disabled = false;
+    }
+
+    function showPreview(template, row, col, isPerfect) {
+        for (let r = 0; r < template.length; r++) {
+            for (let c = 0; c < template[r].length; c++) {
+                if (template[r][c]) {
+                    const cell = document.getElementById(`cell-${row + r}-${col + c}`);
+                    if (cell) { cell.classList.add('preview-ok'); if (isPerfect) cell.classList.add('perfect-preview'); }
+                }
+            }
+        }
+    }
+
+    function clearPreviews() { document.querySelectorAll('.cell').forEach(c => c.classList.remove('preview-ok', 'perfect-preview')); }
+
+    function wouldCompleteLines(template, row, col) {
+        let tempGrid = JSON.parse(JSON.stringify(grid));
+        for (let r = 0; r < template.length; r++) {
+            for (let c = 0; c < template[r].length; c++) { if (template[r][c]) tempGrid[row + r][col + c] = "t"; }
+        }
+        for (let i = 0; i < GRID_SIZE; i++) {
+            if (tempGrid[i].every(c => c !== null)) return true;
+            if (tempGrid.map(r => r[i]).every(c => c !== null)) return true;
+        }
+        return false;
+    }
+
+    document.getElementById('auto-btn').onclick = () => {
+        if (currentPiecesData.length === 0) return;
+        for (let piece of currentPiecesData) {
+            for (let r = 0; r <= GRID_SIZE - piece.template.length; r++) {
+                for (let c = 0; c <= GRID_SIZE - piece.template[0].length; c++) {
+                    if (canPlace(piece.template, r, c)) {
+                        executeMove(piece.id, r, c);
+                        return;
+                    }
+                }
+            }
+        }
+    };
+
+    document.getElementById('new-btn').onclick = initGame;
+    document.getElementById('undo-btn').onclick = () => {
+        const last = history.pop();
+        grid = last.grid; score = last.score; currentPiecesData = last.pieces;
+        scoreElement.innerText = score; updateVisualGrid();
+        piecesContainer.innerHTML = '';
+        currentPiecesData.forEach(p => renderPiece(p.template, p.color, p.id));
+        if (history.length === 0) document.getElementById('undo-btn').disabled = true;
+    };
+
+    initGame();
+</script>
+</body>
+</html>
